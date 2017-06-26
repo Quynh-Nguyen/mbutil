@@ -189,9 +189,6 @@ def disk_to_mbtiles(directory_path, mbtiles_file, **kwargs):
     start_time = time.time()
     msg = ""
 
-    logger.info(kwargs.get('bounds'))
-    sys.exit(0)
-
     for zoom_dir in get_dirs(directory_path):
         if kwargs.get("scheme") == 'ags':
             if not "L" in zoom_dir:
@@ -265,7 +262,7 @@ def disk_to_mbtiles(directory_path, mbtiles_file, **kwargs):
         logger.debug('tiles (and grids) inserted.')
 
     if kwargs.get('compression', False):
-        compression_prepare(cur)
+        compression_prepare(cur, silent)
         compression_do(cur, con, 256, silent)
         compression_finalize(cur, con)
 
@@ -368,6 +365,7 @@ def disk_to_mbtiles_with_bounds(directory_path, mbtiles_file, **kwargs):
                     y = int(file_name)
                 ext = image_format
                 current_file = file_name + '.' + image_format
+
                 pack_tiles(count, cur, current_file, directory_path, ext, image_format, msg, str(row_dir), silent,
                            start_time, x, y, z, zoom_dir)
     
@@ -375,7 +373,7 @@ def disk_to_mbtiles_with_bounds(directory_path, mbtiles_file, **kwargs):
         logger.debug('tiles (and grids) inserted.')
 
     if kwargs.get('compression', False):
-        compression_prepare(cur)
+        compression_prepare(cur, silent)
         compression_do(cur, con, 256, silent)
         compression_finalize(cur, con)
 
