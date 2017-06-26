@@ -262,7 +262,7 @@ def disk_to_mbtiles(directory_path, mbtiles_file, **kwargs):
         logger.debug('tiles (and grids) inserted.')
 
     if kwargs.get('compression', False):
-        compression_prepare(cur, silent)
+        compression_prepare(cur)
         compression_do(cur, con, 256, silent)
         compression_finalize(cur, con)
 
