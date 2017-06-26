@@ -9,7 +9,7 @@
 # for additional reference on schema see:
 # https://github.com/mapbox/node-mbtiles/blob/master/lib/schema.sql
 
-import sqlite3, sys, logging, time, os, json, zlib, re
+import sqlite3, sys, logging, time, os, json, zlib, re, math
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +189,9 @@ def disk_to_mbtiles(directory_path, mbtiles_file, **kwargs):
     start_time = time.time()
     msg = ""
 
+    logger.info(kwargs.get('bounds'))
+    sys.exit(0)
+
     for zoom_dir in get_dirs(directory_path):
         if kwargs.get("scheme") == 'ags':
             if not "L" in zoom_dir:
@@ -267,6 +270,157 @@ def disk_to_mbtiles(directory_path, mbtiles_file, **kwargs):
         compression_finalize(cur, con)
 
     optimize_database(con, silent)
+
+def disk_to_mbtiles_with_bounds(directory_path, mbtiles_file, **kwargs):
+
+    if kwargs.get('bounds'): 
+        bounds = kwargs.get('bounds').split(" ")
+        if len(bounds) != 4:
+            sys.stderr.write("Invalid bounds input. See mb-util --help.\n")
+            exit()
+        else:    
+            top_lat = float(bounds[0])
+            right_lng = float(bounds[1])
+            bottom_lat = float(bounds[2])
+            left_lng = float(bounds[3])
+            if (top_lat < -90 or top_lat > 90 or bottom_lat < -90 or bottom_lat > 90 or
+                    right_lng < -180 or right_lng > 180 or left_lng < -180 or left_lng > 180):
+                sys.stderr.write("Invalid latlng bounds (top and bottom is from -90 to 90 | left and right from -180 to 180)\n")
+                exit()
+    else:
+        sys.stderr.write("Missing bounds array. See mb-util --help.\n")
+        exit()
+
+    silent = kwargs.get('silent')
+
+    if not silent:
+        logger.info("Importing disk to MBTiles")
+        logger.debug("%s --> %s" % (directory_path, mbtiles_file))
+
+    con = mbtiles_connect(mbtiles_file, silent)
+    cur = con.cursor()
+    optimize_connection(cur)
+    mbtiles_setup(cur)
+    #~ image_format = 'png'
+    image_format = kwargs.get('format', 'png')
+
+    try:
+        metadata = json.load(open(os.path.join(directory_path, 'metadata.json'), 'r'))
+        image_format = kwargs.get('format')
+        for name, value in metadata.items():
+            cur.execute('insert into metadata (name, value) values (?, ?)',
+                (name, value))
+        if not silent: 
+            logger.info('metadata from metadata.json restored')
+    except IOError:
+        if not silent: 
+            logger.warning('metadata.json not found')
+
+    count = 0
+    start_time = time.time()
+    msg = ""
+
+    # logger.info(kwargs.get('bounds'))
+    # sys.exit(0)
+
+    # print(get_dirs(directory_path))
+    # exit()
+
+    for zoom_dir in get_dirs(directory_path):
+        if kwargs.get("scheme") == 'ags':
+            if not "L" in zoom_dir:
+                if not silent: 
+                    logger.warning("You appear to be using an ags scheme on an non-arcgis Server cache.")
+            z = int(zoom_dir.replace("L", ""))
+        elif kwargs.get("scheme") == 'gwc':
+            z=int(zoom_dir[-2:])
+        else:
+            if "L" in zoom_dir:
+                if not silent: 
+                    logger.warning("You appear to be using a %s scheme on an arcgis Server cache. Try using --scheme=ags instead" % kwargs.get("scheme"))
+            z = int(zoom_dir)
+
+        max_xy = pow(2, z) - 1
+        from_x = max_xy * (float(left_lng) + 180) / 360
+        to_x = max_xy * (float(right_lng) + 180) / 360
+        south_rad = float(bottom_lat) * math.pi / 180
+        to_y = max_xy * (1.0 - math.log(math.tan(south_rad) + (1 / math.cos(south_rad))) / math.pi) / 2.0
+        north_rad = float(top_lat) * math.pi / 180
+        from_y = max_xy * (1.0 - math.log(math.tan(north_rad) + (1 / math.cos(north_rad))) / math.pi) / 2.0
+
+        for row_dir in range(int(math.floor(from_x)), int(math.ceil(to_x))):
+            for col_name in range(int(math.floor(from_y)), int(math.ceil(to_y))):
+                if str(col_name) == ".DS_Store" and not silent:
+                    logger.warning("Your OS is MacOS,and the .DS_Store file will be ignored.")
+                file_name = str(col_name)
+                if kwargs.get('scheme') == 'xyz':
+                    y = flip_y(int(z), int(file_name))
+                    x = row_dir
+                elif kwargs.get("scheme") == 'ags':
+                    y = flip_y(int(z), int(file_name))
+                    x = int(file_name.replace("C", ""), 16)
+                elif kwargs.get("scheme") == 'gwc':
+                    x, y = file_name.split('_')
+                    x = int(x)
+                    y = int(y)
+                else:
+                    x = row_dir
+                    y = int(file_name)
+                ext = image_format
+                current_file = file_name + '.' + image_format
+                pack_tiles(count, cur, current_file, directory_path, ext, image_format, msg, str(row_dir), silent,
+                           start_time, x, y, z, zoom_dir)
+    
+    if not silent:
+        logger.debug('tiles (and grids) inserted.')
+
+    if kwargs.get('compression', False):
+        compression_prepare(cur)
+        compression_do(cur, con, 256, silent)
+        compression_finalize(cur, con)
+
+    optimize_database(con, silent)
+
+def pack_tiles(count, cur, current_file, directory_path, ext, image_format, msg, row_dir, silent, start_time, x, y, z,
+               zoom_dir):
+
+    path = os.path.join(directory_path, zoom_dir, row_dir, current_file)
+    if os.path.isfile(path):
+        f = open(path, 'rb')
+        file_content = f.read()
+        f.close()
+        if (ext == image_format):
+            if not silent:
+                logger.debug(' Read tile from Zoom (z): %i\tCol (x): %i\tRow (y): %i' % (z, x, y))
+            cur.execute("""insert into tiles (zoom_level,
+                                    tile_column, tile_row, tile_data) values
+                                    (?, ?, ?, ?);""",
+                        (z, x, y, sqlite3.Binary(file_content)))
+            count = count + 1
+            if (count % 100) == 0:
+                for c in msg: sys.stdout.write(chr(8))
+                msg = "%s tiles inserted (%d tiles/sec)" % (count, count / (time.time() - start_time))
+                sys.stdout.write(msg)
+        elif (ext == 'grid.json'):
+            if not silent:
+                logger.debug(' Read grid from Zoom (z): %i\tCol (x): %i\tRow (y): %i' % (z, x, y))
+            # Remove potential callback with regex
+            file_content = file_content.decode('utf-8')
+            has_callback = re.match(r'[\w\s=+-/]+\(({(.|\n)*})\);?', file_content)
+            if has_callback:
+                file_content = has_callback.group(1)
+            utfgrid = json.loads(file_content)
+
+            data = utfgrid.pop('data')
+            compressed = zlib.compress(json.dumps(utfgrid).encode())
+            cur.execute("""insert into grids (zoom_level, tile_column, tile_row, grid) values (?, ?, ?, ?) """,
+                        (z, x, y, sqlite3.Binary(compressed)))
+            grid_keys = [k for k in utfgrid['keys'] if k != ""]
+            for key_name in grid_keys:
+                key_json = data[key_name]
+                cur.execute(
+                    """insert into grid_data (zoom_level, tile_column, tile_row, key_name, key_json) values (?, ?, ?, ?, ?);""",
+                    (z, x, y, key_name, json.dumps(key_json)))
 
 def mbtiles_metadata_to_disk(mbtiles_file, **kwargs):
     silent = kwargs.get('silent')

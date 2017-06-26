@@ -10,9 +10,10 @@
 import logging, os, sys
 from optparse import OptionParser
 
-from mbutil import mbtiles_to_disk, disk_to_mbtiles, mbtiles_metadata_to_disk
+from mbutil import mbtiles_to_disk, disk_to_mbtiles, mbtiles_metadata_to_disk, disk_to_mbtiles_with_bounds
 
 if __name__ == '__main__':
+
 
     logging.basicConfig(level=logging.DEBUG)
 
@@ -58,7 +59,15 @@ if __name__ == '__main__':
         action="store_true",
         default=False)
 
+    parser.add_option('--bounds', dest='bounds',
+        help='''Bounds value have format: --bounds "26.3070 128.0333 26.0284 127.5111"''',        
+        default=False)
+
     (options, args) = parser.parse_args()
+
+    # print("{0} {1}".format(args[0], args[1]))
+    # print("{}".format(options.bounds))
+    # exit()
 
     # Transfer operations
     if len(args) != 2:
@@ -84,6 +93,11 @@ if __name__ == '__main__':
         sys.exit(1)
     
     # to mbtiles
-    if os.path.isdir(args[0]) and not os.path.isfile(args[0]):
+    if os.path.isdir(args[0]) and not os.path.isfile(args[0]) and not options.bounds:
         directory_path, mbtiles_file = args
         disk_to_mbtiles(directory_path, mbtiles_file, **options.__dict__)
+
+    # to mbtiles with bounds
+    if os.path.isdir(args[0]) and not os.path.isfile(args[0]) and options.bounds:
+        directory_path, mbtiles_file = args
+        disk_to_mbtiles_with_bounds(directory_path, mbtiles_file, **options.__dict__)
