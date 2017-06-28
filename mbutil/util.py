@@ -39,6 +39,7 @@ def mbtiles_connect(mbtiles_file, silent):
         con = sqlite3.connect(mbtiles_file)
         return con
     except Exception as e:
+        print(e)
         if not silent:
             logger.error("Could not connect to database")
             logger.exception(e)
@@ -131,6 +132,7 @@ def compression_do(cur, con, chunk, silent):
         con.commit()
 
 def compression_finalize(cur, con):
+    print('Finalizing database compression')
     logger.debug('Finalizing database compression.')
     cur.execute("""drop table tiles;""")
     cur.execute("""create view tiles as
@@ -188,6 +190,8 @@ def disk_to_mbtiles(directory_path, mbtiles_file, **kwargs):
     count = 0
     start_time = time.time()
     msg = ""
+
+    print(directory_path, mbtiles_file)
 
     for zoom_dir in get_dirs(directory_path):
         if kwargs.get("scheme") == 'ags':
